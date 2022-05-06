@@ -40,14 +40,12 @@
 
 #include <Eigen/Geometry>
 
-#include <QtGui/QApplication>
+#include <QtWidgets/QApplication>
 
 #include <hector_map_tools/HectorMapTools.h>
 
 #include <hector_geotiff/geotiff_writer.h>
 #include <hector_geotiff/map_writer_plugin_interface.h>
-
-#include <hector_nav_msgs/GetRobotTrajectory.h>
 
 using namespace std;
 
@@ -78,7 +76,6 @@ public:
 
     map_service_client_ = n_.serviceClient<nav_msgs::GetMap>("map");
     //object_service_client_ = n_.serviceClient<worldmodel_msgs::GetObjectModel>("worldmodel/get_object_model");
-    path_service_client_ = n_.serviceClient<hector_nav_msgs::GetRobotTrajectory>("trajectory");
 
 
     double p_geotiff_save_period = 0.0;
@@ -278,7 +275,6 @@ public:
 
   ros::ServiceClient map_service_client_;// = n.serviceClient<beginner_tutorials::AddTwoInts>("add_two_ints");
   ros::ServiceClient object_service_client_;
-  ros::ServiceClient path_service_client_;
 
   ros::Subscriber sys_cmd_sub_;
 

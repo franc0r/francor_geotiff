@@ -37,7 +37,7 @@
 #include <nav_msgs/MapMetaData.h>
 
 #include <QtGui/QImage>
-#include <QtGui/QApplication>
+#include <QtWidgets/QApplication>
 #include <QtGui/QFont>
 #include <QtGui/QPen>
 
