@@ -4,7 +4,7 @@ project(hector_geotiff)
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
-find_package(catkin REQUIRED COMPONENTS hector_map_tools nav_msgs pluginlib roscpp std_msgs)
+find_package(catkin REQUIRED COMPONENTS hector_map_tools nav_msgs pluginlib roscpp std_msgs ohm_rrl_perception_msgs)
 
 add_compile_options(-std=c++1y)
 

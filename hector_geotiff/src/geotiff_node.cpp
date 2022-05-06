@@ -29,6 +29,8 @@
 #include <cstdio>
 #include <ros/ros.h>
 #include <ros/console.h>
+#include <ohm_rrl_perception_msgs/Qr.h>
+#include <geometry_msgs/PoseArray.h>
 #include <pluginlib/class_loader.h>
 
 #include <boost/algorithm/string.hpp>
@@ -37,6 +39,7 @@
 #include "nav_msgs/GetMap.h"
 #include "std_msgs/String.h"
 #include "geometry_msgs/Quaternion.h"
+#include "std_srvs/Empty.h"
 
 #include <Eigen/Geometry>
 
@@ -47,9 +50,51 @@
 #include <hector_geotiff/geotiff_writer.h>
 #include <hector_geotiff/map_writer_plugin_interface.h>
 
+#include <unordered_map>
+#include <fstream>
+#include <ctime>
+#include <random>
+
 using namespace std;
 
 namespace hector_geotiff{
+
+class ObjectLog
+{
+public:
+  explicit ObjectLog(const std::string& file_name)
+    : file_name_(file_name)
+  {
+    ROS_WARN_STREAM("open new file " << (file_name_ + std::to_string(run_counter_) + ".csv"));
+    file_.open(file_name + std::to_string(run_counter_) + ".csv");
+    writeHeader();
+  }
+  ~ObjectLog() {
+    file_.close();
+  }
+
+  ObjectLog& operator<<(const ohm_rrl_perception_msgs::Qr& qr_object) {
+    file_ << qr_object.id << "; " << qr_object.data << "; " << qr_object.pose.position.x << "; " << qr_object.pose.position.y << "; " << qr_object.pose.position.z << "\n";
+    return *this;
+  }
+
+  void clear() {
+    file_.close();
+    ++run_counter_;
+    ROS_WARN_STREAM("open new file " << (file_name_ + std::to_string(run_counter_) + ".csv"));
+    file_.open(file_name_ + std::to_string(run_counter_) + ".csv");
+    writeHeader();    
+  }
+
+private:
+  void writeHeader() {
+    file_ << "id; text; pos x; pos y; pos z\n";
+  }
+
+  std::ofstream file_;
+  std::string file_name_;
+  std::size_t run_counter_ = 0u;
+};
 
 /**
  * @brief Map generation node.
@@ -62,6 +107,7 @@ public:
     , pn_("~")    
     , plugin_loader_(0)
     , running_saved_map_num_(0)
+    , qr_codes_logger_("/home/user/qr_codes_exp")
   {
     pn_.param("map_file_path", p_map_file_path_, std::string("."));
     geotiff_writer_.setMapFilePath(p_map_file_path_);
@@ -73,10 +119,14 @@ public:
     pn_.param("draw_free_space_grid", p_draw_free_space_grid_, true);
 
     sys_cmd_sub_ = n_.subscribe("syscommand", 1, &MapGenerator::sysCmdCallback, this);
+    sub_map_     = n_.subscribe("map", 1, &MapGenerator::subMapCallback, this);
+    sub_victims_ = n_.subscribe("hector/_victims", 1, &MapGenerator::subVictimsCallback, this);
+    sub_qr_detection_ = n_.subscribe("qr/localized", 1, &MapGenerator::subQrDetectionCallback, this);
 
-    map_service_client_ = n_.serviceClient<nav_msgs::GetMap>("map");
+    // map_service_client_ = n_.serviceClient<nav_msgs::GetMap>("static_map");
     //object_service_client_ = n_.serviceClient<worldmodel_msgs::GetObjectModel>("worldmodel/get_object_model");
 
+    srv_save_geotiff_ = n_.advertiseService("save_geotiff", &MapGenerator::serviceSaveGeotiffCall, this);
 
     double p_geotiff_save_period = 0.0;
     pn_.param("geotiff_save_period", p_geotiff_save_period, 0.0);
@@ -129,11 +179,11 @@ public:
 
     std::stringstream ssStream;
 
-    nav_msgs::GetMap srv_map;
-    if (map_service_client_.call(srv_map))
+    // nav_msgs::GetMap srv_map;
+    // if (map_service_client_.call(srv_map))
     {
       ROS_INFO("GeotiffNode: Map service called successfully");
-      const nav_msgs::OccupancyGrid& map (srv_map.response.map);
+      const nav_msgs::OccupancyGrid& map (map_);
 
       std::string map_file_name = p_map_file_base_name_;
       std::string competition_name;
@@ -163,13 +213,29 @@ public:
       geotiff_writer_.drawMap(map, p_draw_free_space_grid_);
       geotiff_writer_.drawCoords();
 
+      int cnt = 0;
+      for(auto& e : victims_.poses)
+      {
+        std::string id = std::to_string(cnt++);
+        geotiff_writer_.drawObjectOfInterest(Eigen::Vector2f(e.position.x,e.position.y), id , hector_geotiff::MapWriterInterface::Color(255, 0,0));
+      }
+
+      cnt = 0;
+      for(const auto& qr : qr_codes_)
+      {
+        geotiff_writer_.drawObjectOfInterest(Eigen::Vector2f(qr.second.pose.position.x,qr.second.pose.position.y), std::to_string(qr.second.id), hector_geotiff::MapWriterInterface::Color(0, 0,255));
+        qr_codes_logger_ << qr.second;
+      }
+
+      // geotiff_writer_.drawObjectOfInterest(Eigen::Vector2f(10.0,10.0), "hans" , hector_geotiff::MapWriterInterface::Color(255, 0,0));
+
       //ROS_INFO("Sum: %ld", (long int)srv.response.sum);
     }
-    else
-    {
-      ROS_ERROR("Failed to call map service");
-      return;
-    }
+    // else
+    // {
+    //   ROS_ERROR("Failed to call map service");
+    //   return;
+    // }
 
     for (size_t i = 0; i < plugin_vector_.size(); ++i){
       plugin_vector_[i]->draw(&geotiff_writer_);
@@ -247,6 +313,9 @@ public:
     ros::Duration elapsed_time (ros::Time::now() - start_time);
 
     ROS_INFO("GeoTiff created in %f seconds", elapsed_time.toSec());
+
+    qr_codes_logger_.clear();
+    qr_codes_.clear();
   }
 
   void timerSaveGeotiffCallback(const ros::TimerEvent& e)
@@ -263,6 +332,37 @@ public:
     this->writeGeotiff();
   }
 
+  bool serviceSaveGeotiffCall(
+    std_srvs::Empty::Request  &req,
+    std_srvs::Empty::Response &res)
+  {
+    this->writeGeotiff();
+    return true;
+  }
+
+  void subMapCallback(const nav_msgs::OccupancyGrid& msg)
+  {
+    ROS_INFO("Got Map");
+    map_ = msg;
+    map_.info.origin.orientation.w = 1.0;
+
+    ROS_INFO_STREAM("map info: " << map_.info.origin);
+  } 
+
+  void subVictimsCallback(const geometry_msgs::PoseArray& msg)
+  {
+    victims_ = msg;
+  }
+
+  void subQrDetectionCallback(const ohm_rrl_perception_msgs::Qr& qr)
+  {
+    if (qr_codes_.find(qr.data) == qr_codes_.end()) {
+      auto qr_copy = qr;
+      qr_copy.id = qr_codes_.size() + 1;
+      qr_codes_[qr.data] = qr_copy;      
+    }
+  }
+
   std::string p_map_file_path_;
   std::string p_map_file_base_name_;
   std::string p_plugin_list_;
@@ -276,10 +376,22 @@ public:
   ros::ServiceClient map_service_client_;// = n.serviceClient<beginner_tutorials::AddTwoInts>("add_two_ints");
   ros::ServiceClient object_service_client_;
 
+  ros::ServiceServer srv_save_geotiff_;
+
   ros::Subscriber sys_cmd_sub_;
+  ros::Subscriber sub_map_;
+  ros::Subscriber sub_victims_;
+  ros::Subscriber sub_qr_detection_;
 
   ros::NodeHandle n_;
   ros::NodeHandle pn_;
+
+  nav_msgs::OccupancyGrid map_;
+
+  geometry_msgs::PoseArray victims_;
+
+  std::unordered_map<std::string, ohm_rrl_perception_msgs::Qr> qr_codes_;
+  ObjectLog qr_codes_logger_;
 
   std::vector<boost::shared_ptr<hector_geotiff::MapWriterPluginInterface> > plugin_vector_;
 
