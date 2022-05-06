@@ -38,15 +38,12 @@
   <!-- Use test_depend for packages you need only for testing: -->
   <!--   <test_depend>gtest</test_depend> -->
   <buildtool_depend>catkin</buildtool_depend>
-  <build_depend>hector_map_tools</build_depend>
   <build_depend>nav_msgs</build_depend>
   <build_depend>pluginlib</build_depend>
   <build_depend>roscpp</build_depend>
   <build_depend>std_msgs</build_depend>
   <build_depend>libqt5-dev</build_depend>
   <build_depend>ohm_rrl_perception_msgs</build_depend>
-  <!--<run_depend>hector_geotiff_plugins</run_depend>-->
-  <run_depend>hector_map_tools</run_depend>
   <run_depend>nav_msgs</run_depend>
   <run_depend>pluginlib</run_depend>
   <run_depend>roscpp</run_depend>

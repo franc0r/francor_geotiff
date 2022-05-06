@@ -45,7 +45,7 @@
 
 #include <QtWidgets/QApplication>
 
-#include <hector_map_tools/HectorMapTools.h>
+#include <hector_geotiff/HectorMapTools.h>
 
 #include <hector_geotiff/geotiff_writer.h>
 #include <hector_geotiff/map_writer_plugin_interface.h>

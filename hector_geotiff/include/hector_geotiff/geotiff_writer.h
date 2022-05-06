@@ -41,7 +41,7 @@
 #include <QtGui/QFont>
 #include <QtGui/QPen>
 
-#include <hector_map_tools/HectorMapTools.h>
+#include <hector_geotiff/HectorMapTools.h>
 
 
 namespace hector_geotiff{
