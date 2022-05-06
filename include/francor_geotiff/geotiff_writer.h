@@ -41,10 +41,10 @@
 #include <QtGui/QFont>
 #include <QtGui/QPen>
 
-#include <hector_geotiff/HectorMapTools.h>
+#include <francor_geotiff/HectorMapTools.h>
 
 
-namespace hector_geotiff{
+namespace francor_geotiff{
 
 
 class GeotiffWriter : public MapWriterInterface

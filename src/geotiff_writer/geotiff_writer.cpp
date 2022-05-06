@@ -27,7 +27,7 @@
 //=================================================================================================
 
 #include <ros/console.h>
-#include <hector_geotiff/geotiff_writer.h>
+#include <francor_geotiff/geotiff_writer.h>
 
 #include <QtGui/QPainter>
 #include <QtGui/QImageWriter>
@@ -37,7 +37,7 @@
 #include <QtCore/QTime>
 #include <QtCore/QTextStream>
 
-namespace hector_geotiff{
+namespace francor_geotiff{
 
 
 GeotiffWriter::GeotiffWriter(bool useCheckerboardCacheIn)

@@ -36,13 +36,13 @@
 
 #include <QtWidgets/QApplication>
 
-#include <hector_geotiff/HectorMapTools.h>
+#include <francor_geotiff/HectorMapTools.h>
 
-#include <hector_geotiff/geotiff_writer.h>
+#include <francor_geotiff/geotiff_writer.h>
 
 using namespace std;
 
-namespace hector_geotiff{
+namespace francor_geotiff{
 
 /**
  * @brief Map generation node.
@@ -116,7 +116,7 @@ int main(int argc, char** argv)
 
   //GeotiffWriter geotiff_writer;
   //geotiff_writer.setMapName("test");
-  hector_geotiff::MapGenerator mg(mapname);
+  francor_geotiff::MapGenerator mg(mapname);
 
   ros::spin();
 

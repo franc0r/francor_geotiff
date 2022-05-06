@@ -31,7 +31,7 @@
 
 #include "map_writer_interface.h"
 
-namespace hector_geotiff{
+namespace francor_geotiff{
 
 class MapWriterPluginInterface{
 
@@ -42,6 +42,6 @@ public:
 
 };
 
-} //namespace hector_geotiff
+} //namespace francor_geotiff
 
 #endif

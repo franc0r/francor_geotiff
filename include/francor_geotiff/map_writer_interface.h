@@ -32,7 +32,7 @@
 #include <vector>
 #include <Eigen/Core>
 
-namespace hector_geotiff{
+namespace francor_geotiff{
 
 class MapWriterInterface{
 public:

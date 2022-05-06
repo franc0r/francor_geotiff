@@ -45,10 +45,10 @@
 
 #include <QtWidgets/QApplication>
 
-#include <hector_geotiff/HectorMapTools.h>
+#include <francor_geotiff/HectorMapTools.h>
 
-#include <hector_geotiff/geotiff_writer.h>
-#include <hector_geotiff/map_writer_plugin_interface.h>
+#include <francor_geotiff/geotiff_writer.h>
+#include <francor_geotiff/map_writer_plugin_interface.h>
 
 #include <unordered_map>
 #include <fstream>
@@ -57,7 +57,7 @@
 
 using namespace std;
 
-namespace hector_geotiff{
+namespace francor_geotiff{
 
 class ObjectLog
 {
@@ -145,12 +145,12 @@ public:
 
     //We always have at least one element containing "" in the string list
     if ((plugin_list.size() > 0) && (plugin_list[0].length() > 0)){
-      plugin_loader_ = new pluginlib::ClassLoader<hector_geotiff::MapWriterPluginInterface>("hector_geotiff", "hector_geotiff::MapWriterPluginInterface");
+      plugin_loader_ = new pluginlib::ClassLoader<francor_geotiff::MapWriterPluginInterface>("francor_geotiff", "francor_geotiff::MapWriterPluginInterface");
 
       for (size_t i = 0; i < plugin_list.size(); ++i){
         try
         {
-          boost::shared_ptr<hector_geotiff::MapWriterPluginInterface> tmp (plugin_loader_->createInstance(plugin_list[i]));
+          boost::shared_ptr<francor_geotiff::MapWriterPluginInterface> tmp (plugin_loader_->createInstance(plugin_list[i]));
           tmp->initialize(plugin_loader_->getName(plugin_list[i]));
           plugin_vector_.push_back(tmp);
         }
@@ -217,17 +217,17 @@ public:
       for(auto& e : victims_.poses)
       {
         std::string id = std::to_string(cnt++);
-        geotiff_writer_.drawObjectOfInterest(Eigen::Vector2f(e.position.x,e.position.y), id , hector_geotiff::MapWriterInterface::Color(255, 0,0));
+        geotiff_writer_.drawObjectOfInterest(Eigen::Vector2f(e.position.x,e.position.y), id , francor_geotiff::MapWriterInterface::Color(255, 0,0));
       }
 
       cnt = 0;
       for(const auto& qr : qr_codes_)
       {
-        geotiff_writer_.drawObjectOfInterest(Eigen::Vector2f(qr.second.pose.position.x,qr.second.pose.position.y), std::to_string(qr.second.id), hector_geotiff::MapWriterInterface::Color(0, 0,255));
+        geotiff_writer_.drawObjectOfInterest(Eigen::Vector2f(qr.second.pose.position.x,qr.second.pose.position.y), std::to_string(qr.second.id), francor_geotiff::MapWriterInterface::Color(0, 0,255));
         qr_codes_logger_ << qr.second;
       }
 
-      // geotiff_writer_.drawObjectOfInterest(Eigen::Vector2f(10.0,10.0), "hans" , hector_geotiff::MapWriterInterface::Color(255, 0,0));
+      // geotiff_writer_.drawObjectOfInterest(Eigen::Vector2f(10.0,10.0), "hans" , francor_geotiff::MapWriterInterface::Color(255, 0,0));
 
       //ROS_INFO("Sum: %ld", (long int)srv.response.sum);
     }
@@ -393,9 +393,9 @@ public:
   std::unordered_map<std::string, ohm_rrl_perception_msgs::Qr> qr_codes_;
   ObjectLog qr_codes_logger_;
 
-  std::vector<boost::shared_ptr<hector_geotiff::MapWriterPluginInterface> > plugin_vector_;
+  std::vector<boost::shared_ptr<francor_geotiff::MapWriterPluginInterface> > plugin_vector_;
 
-  pluginlib::ClassLoader<hector_geotiff::MapWriterPluginInterface>* plugin_loader_;
+  pluginlib::ClassLoader<francor_geotiff::MapWriterPluginInterface>* plugin_loader_;
 
   ros::Timer map_save_timer_;
 
@@ -408,7 +408,7 @@ int main(int argc, char** argv)
 {
   ros::init(argc, argv, "geotiff_node");
 
-  hector_geotiff::MapGenerator mg;
+  francor_geotiff::MapGenerator mg;
 
   //ros::NodeHandle pn_;
   //double p_geotiff_save_period = 60.0f;
