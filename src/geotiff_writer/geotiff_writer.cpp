@@ -26,7 +26,7 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //=================================================================================================
 
-#include <ros/console.h>
+#include <rclcpp/logging.hpp>
 #include <francor_geotiff/geotiff_writer.h>
 
 #include <QtGui/QPainter>
@@ -40,9 +40,10 @@
 namespace francor_geotiff{
 
 
-GeotiffWriter::GeotiffWriter(bool useCheckerboardCacheIn)
+GeotiffWriter::GeotiffWriter(rclcpp::Logger logger, bool useCheckerboardCacheIn)
   : useCheckerboardCache(useCheckerboardCacheIn)
   , use_utc_time_suffix_(true)
+  , logger_(logger)
 {
   cached_map_meta_data_.height = -1;
   cached_map_meta_data_.width = -1;
@@ -87,7 +88,7 @@ void GeotiffWriter::setUseUtcTimeSuffix(bool useSuffix)
 }
 
 
-bool GeotiffWriter::setupTransforms(const nav_msgs::OccupancyGrid& map)
+bool GeotiffWriter::setupTransforms(const nav_msgs::msg::OccupancyGrid& map)
 {
   resolution = static_cast<float>(map.info.resolution);
   origin = Eigen::Vector2f(map.info.origin.position.x, map.info.origin.position.y);
@@ -102,7 +103,7 @@ bool GeotiffWriter::setupTransforms(const nav_msgs::OccupancyGrid& map)
   maxCoordsMap = Eigen::Vector2i(map.info.width, map.info.height);
 
   if(!HectorMapTools::getMapExtends(map, minCoordsMap, maxCoordsMap)){
-    ROS_INFO("Cannot determine map extends!");
+    RCLCPP_INFO(logger_, "Cannot determine map extends!");
     return false;
   }
 
@@ -269,7 +270,7 @@ void GeotiffWriter::drawBackgroundCheckerboard()
   }
 }
 
-void GeotiffWriter::drawMap(const nav_msgs::OccupancyGrid& map, bool draw_explored_space_grid)
+void GeotiffWriter::drawMap(const nav_msgs::msg::OccupancyGrid& map, bool draw_explored_space_grid)
 {
   QPainter qPainter(&image);
 
@@ -502,9 +503,9 @@ void GeotiffWriter::writeGeotiffImage()
   tfwFile.close();
 
   if(!success){
-    ROS_INFO("Writing image with file %s failed with error %s", complete_file_string.c_str(), imageWriter.errorString().toStdString().c_str());
+    RCLCPP_INFO(logger_, "Writing image with file %s failed with error %s", complete_file_string.c_str(), imageWriter.errorString().toStdString().c_str());
   }else{
-    ROS_INFO("Successfully wrote geotiff to %s", complete_file_string.c_str());
+    RCLCPP_INFO(logger_, "Successfully wrote geotiff to %s", complete_file_string.c_str());
   }
 }
 

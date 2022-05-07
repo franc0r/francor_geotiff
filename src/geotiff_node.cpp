@@ -27,19 +27,20 @@
 //=================================================================================================
 
 #include <cstdio>
-#include <ros/ros.h>
-#include <ros/console.h>
-#include <ohm_rrl_perception_msgs/Qr.h>
-#include <geometry_msgs/PoseArray.h>
-#include <pluginlib/class_loader.h>
+#include <rclcpp/logging.hpp>
+#include <rclcpp/parameter.hpp>
+#include <rclcpp/rclcpp.hpp>
+#include <ohm_rrl_perception_msgs/msg/qr.hpp>
+#include <geometry_msgs/msg/pose_array.hpp>
+#include <pluginlib/class_loader.hpp>
 
 #include <boost/algorithm/string.hpp>
 
 
-#include "nav_msgs/GetMap.h"
-#include "std_msgs/String.h"
-#include "geometry_msgs/Quaternion.h"
-#include "std_srvs/Empty.h"
+#include "nav_msgs/srv/get_map.hpp"
+#include "std_msgs/msg/string.hpp"
+#include "geometry_msgs/msg/quaternion.hpp"
+#include "std_srvs/srv/empty.hpp"
 
 #include <Eigen/Geometry>
 
@@ -50,6 +51,8 @@
 #include <francor_geotiff/geotiff_writer.h>
 #include <francor_geotiff/map_writer_plugin_interface.h>
 
+#include <rclcpp/time.hpp>
+#include <std_msgs/msg/detail/string__struct.hpp>
 #include <unordered_map>
 #include <fstream>
 #include <ctime>
@@ -62,10 +65,11 @@ namespace francor_geotiff{
 class ObjectLog
 {
 public:
-  explicit ObjectLog(const std::string& file_name)
-    : file_name_(file_name)
+  explicit ObjectLog(rclcpp::Logger logger, const std::string& file_name)
+    : logger_(logger)
+    , file_name_(file_name)
   {
-    ROS_WARN_STREAM("open new file " << (file_name_ + std::to_string(run_counter_) + ".csv"));
+    RCLCPP_WARN_STREAM(logger_, "open new file " << (file_name_ + std::to_string(run_counter_) + ".csv"));
     file_.open(file_name + std::to_string(run_counter_) + ".csv");
     writeHeader();
   }
@@ -73,7 +77,7 @@ public:
     file_.close();
   }
 
-  ObjectLog& operator<<(const ohm_rrl_perception_msgs::Qr& qr_object) {
+  ObjectLog& operator<<(const ohm_rrl_perception_msgs::msg::Qr& qr_object) {
     file_ << qr_object.id << "; " << qr_object.data << "; " << qr_object.pose.position.x << "; " << qr_object.pose.position.y << "; " << qr_object.pose.position.z << "\n";
     return *this;
   }
@@ -81,7 +85,7 @@ public:
   void clear() {
     file_.close();
     ++run_counter_;
-    ROS_WARN_STREAM("open new file " << (file_name_ + std::to_string(run_counter_) + ".csv"));
+    RCLCPP_WARN_STREAM(logger_, "open new file " << (file_name_ + std::to_string(run_counter_) + ".csv"));
     file_.open(file_name_ + std::to_string(run_counter_) + ".csv");
     writeHeader();    
   }
@@ -91,6 +95,7 @@ private:
     file_ << "id; text; pos x; pos y; pos z\n";
   }
 
+  rclcpp::Logger logger_;
   std::ofstream file_;
   std::string file_name_;
   std::size_t run_counter_ = 0u;
@@ -99,108 +104,121 @@ private:
 /**
  * @brief Map generation node.
  */
-class MapGenerator
+class MapGenerator : public rclcpp::Node
 {
 public:
   MapGenerator()
-    : geotiff_writer_(false)
-    , pn_("~")    
-    , plugin_loader_(0)
+    : Node("geotiff_node")
+    , geotiff_writer_(rclcpp::get_logger("geotiff_node"), false)
+//    , plugin_loader_(0)
+    , qr_codes_logger_(rclcpp::get_logger("geotiff_node"), "/home/user/qr_codes_exp")
     , running_saved_map_num_(0)
-    , qr_codes_logger_("/home/user/qr_codes_exp")
   {
-    pn_.param("map_file_path", p_map_file_path_, std::string("."));
+
+    this->declare_parameter<string>("map_file_path", ".");
+    this->declare_parameter<string>("map_file_base_name", std::string());
+    this->declare_parameter<bool>("draw_background_checkerboard", true);
+    this->declare_parameter<bool>("draw_free_space_grid", true);
+    this->declare_parameter<double>("geotiff_save_period", 0.0);
+
+
+    p_map_file_path_ = this->get_parameter("map_file_path").as_string();
     geotiff_writer_.setMapFilePath(p_map_file_path_);
     geotiff_writer_.setUseUtcTimeSuffix(true);
 
-    pn_.param("map_file_base_name", p_map_file_base_name_, std::string());
+    p_map_file_base_name_ = this->get_parameter("map_file_base_name").as_string();
 
-    pn_.param("draw_background_checkerboard", p_draw_background_checkerboard_, true);
-    pn_.param("draw_free_space_grid", p_draw_free_space_grid_, true);
+    p_draw_background_checkerboard_ = this->get_parameter("draw_background_checkerboard").as_bool();
+    p_draw_free_space_grid_ = this->get_parameter("draw_free_space_grid").as_bool();
 
-    sys_cmd_sub_ = n_.subscribe("syscommand", 1, &MapGenerator::sysCmdCallback, this);
-    sub_map_     = n_.subscribe("map", 1, &MapGenerator::subMapCallback, this);
-    sub_victims_ = n_.subscribe("hector/_victims", 1, &MapGenerator::subVictimsCallback, this);
-    sub_qr_detection_ = n_.subscribe("qr/localized", 1, &MapGenerator::subQrDetectionCallback, this);
+    sys_cmd_sub_ = this->create_subscription<std_msgs::msg::String>("syscommand", 10, std::bind(&MapGenerator::sysCmdCallback, this, std::placeholders::_1));
+    sub_map_ = this->create_subscription<nav_msgs::msg::OccupancyGrid>("map", 10, std::bind(&MapGenerator::subMapCallback, this, std::placeholders::_1));
+    sub_victims_ = this->create_subscription<geometry_msgs::msg::PoseArray>("hector/_victims", 10, std::bind(&MapGenerator::subVictimsCallback, this, std::placeholders::_1));
+    sub_qr_detection_ = this->create_subscription<ohm_rrl_perception_msgs::msg::Qr>("qr/localized", 10, std::bind(&MapGenerator::subQrDetectionCallback, this, std::placeholders::_1));
 
-    // map_service_client_ = n_.serviceClient<nav_msgs::GetMap>("static_map");
-    //object_service_client_ = n_.serviceClient<worldmodel_msgs::GetObjectModel>("worldmodel/get_object_model");
+    map_service_client_ = this->create_client<nav_msgs::srv::GetMap>("static_map");
+    //object_service_client_ = n_.serviceClient<worldmodel_msgs::srv::GetObjectModel>("worldmodel/get_object_model");
 
-    srv_save_geotiff_ = n_.advertiseService("save_geotiff", &MapGenerator::serviceSaveGeotiffCall, this);
+    srv_save_geotiff_ = this->create_service<std_srvs::srv::Empty>("save_geotiff", std::bind(&MapGenerator::serviceSaveGeotiffCall, this, std::placeholders::_1, std::placeholders::_2));
 
-    double p_geotiff_save_period = 0.0;
-    pn_.param("geotiff_save_period", p_geotiff_save_period, 0.0);
+    double p_geotiff_save_period = this->get_parameter("geotiff_save_period").as_double();
 
     if(p_geotiff_save_period > 0.0){
       //ros::Timer timer = pn_.createTimer(ros::Duration(p_geotiff_save_period), &MapGenerator::timerSaveGeotiffCallback, false);
       //publish_trajectory_timer_ = private_nh.createTimer(ros::Duration(1.0 / p_trajectory_publish_rate_), &PathContainer::publishTrajectoryTimerCallback, this, false);
-      map_save_timer_ = pn_.createTimer(ros::Duration(p_geotiff_save_period), &MapGenerator::timerSaveGeotiffCallback, this, false );
+      map_save_timer_ = this->create_wall_timer(std::chrono::duration<double>(p_geotiff_save_period), std::bind(&MapGenerator::timerSaveGeotiffCallback, this));
     }
 
+    // pn_.param("plugins", p_plugin_list_, std::string(""));
 
-    pn_.param("plugins", p_plugin_list_, std::string(""));
+    // std::vector<std::string> plugin_list;
+    // boost::algorithm::split(plugin_list, p_plugin_list_, boost::is_any_of("\t "));
 
-    std::vector<std::string> plugin_list;
-    boost::algorithm::split(plugin_list, p_plugin_list_, boost::is_any_of("\t "));
+    // //We always have at least one element containing "" in the string list
+    // if ((plugin_list.size() > 0) && (plugin_list[0].length() > 0)){
+    //   plugin_loader_ = new pluginlib::ClassLoader<francor_geotiff::MapWriterPluginInterface>("francor_geotiff", "francor_geotiff::MapWriterPluginInterface");
 
-    //We always have at least one element containing "" in the string list
-    if ((plugin_list.size() > 0) && (plugin_list[0].length() > 0)){
-      plugin_loader_ = new pluginlib::ClassLoader<francor_geotiff::MapWriterPluginInterface>("francor_geotiff", "francor_geotiff::MapWriterPluginInterface");
-
-      for (size_t i = 0; i < plugin_list.size(); ++i){
-        try
-        {
-          boost::shared_ptr<francor_geotiff::MapWriterPluginInterface> tmp (plugin_loader_->createInstance(plugin_list[i]));
-          tmp->initialize(plugin_loader_->getName(plugin_list[i]));
-          plugin_vector_.push_back(tmp);
-        }
-        catch(pluginlib::PluginlibException& ex)
-        {
-          ROS_ERROR("The plugin failed to load for some reason. Error: %s", ex.what());
-        }
-      }
-    }else{
-      ROS_INFO("No plugins loaded for geotiff node");
-    }
-
-    ROS_INFO("Geotiff node started");
+    //   for (size_t i = 0; i < plugin_list.size(); ++i){
+    //     try
+    //     {
+    //       boost::shared_ptr<francor_geotiff::MapWriterPluginInterface> tmp (plugin_loader_->createInstance(plugin_list[i]));
+    //       tmp->initialize(plugin_loader_->getName(plugin_list[i]));
+    //       plugin_vector_.push_back(tmp);
+    //     }
+    //     catch(pluginlib::PluginlibException& ex)
+    //     {
+    //       ROS_ERROR("The plugin failed to load for some reason. Error: %s", ex.what());
+    //     }
+    //   }
+    // }else{
+    //   RCLCPP_INFO(this->get_logger(), "No plugins loaded for geotiff node");
+    // }
+    RCLCPP_INFO(this->get_logger(), "Geotiff node started");
   }
 
   ~MapGenerator()
   {
-    if (plugin_loader_){
-      delete plugin_loader_;
-    }
+    // if (plugin_loader_){
+    //   delete plugin_loader_;
+    // }
   }
 
   void writeGeotiff()
   {
-    ros::Time start_time (ros::Time::now());
+    
+    rclcpp::Time start_time (this->now());
 
     std::stringstream ssStream;
 
     // nav_msgs::GetMap srv_map;
     // if (map_service_client_.call(srv_map))
     {
-      ROS_INFO("GeotiffNode: Map service called successfully");
-      const nav_msgs::OccupancyGrid& map (map_);
+      RCLCPP_INFO(this->get_logger(), "GeotiffNode: Map service called successfully");
+      const nav_msgs::msg::OccupancyGrid& map (map_);
 
       std::string map_file_name = p_map_file_base_name_;
-      std::string competition_name;
-      std::string team_name;
-      std::string mission_name;
-      std::string postfix;
-      if (n_.getParamCached("/competition", competition_name) && !competition_name.empty()) map_file_name = map_file_name + "_" + competition_name;
-      if (n_.getParamCached("/team", team_name)               && !team_name.empty())        map_file_name = map_file_name + "_" + team_name;
-      if (n_.getParamCached("/mission", mission_name)         && !mission_name.empty())     map_file_name = map_file_name + "_" + mission_name;
-      if (pn_.getParamCached("map_file_postfix", postfix)     && !postfix.empty())          map_file_name = map_file_name + "_" + postfix;
+
+      rclcpp::Parameter competition_name;
+      rclcpp::Parameter team_name;
+      rclcpp::Parameter mission_name;
+      rclcpp::Parameter postfix;
+
+      if (this->get_parameter("/competition", competition_name) && !competition_name.as_string().empty())
+        map_file_name = map_file_name + "_" + competition_name.as_string();
+      if (this->get_parameter("/team", team_name) && !team_name.as_string().empty())
+        map_file_name = map_file_name + "_" + team_name.as_string();
+      if (this->get_parameter("/mission", mission_name) && !mission_name.as_string().empty())
+        map_file_name = map_file_name + "_" + mission_name.as_string();
+      if (this->get_parameter("map_file_postfix", postfix) && !postfix.as_string().empty())
+        map_file_name = map_file_name + "_" + postfix.as_string();
+
       if (map_file_name.substr(0, 1) == "_") map_file_name = map_file_name.substr(1);
       if (map_file_name.empty()) map_file_name = "GeoTiffMap";
       geotiff_writer_.setMapFileName(map_file_name);
       bool transformSuccess = geotiff_writer_.setupTransforms(map);
 
       if(!transformSuccess){
-        ROS_INFO("Couldn't set map transform");
+        RCLCPP_INFO(this->get_logger(), "Couldn't set map transform");
         return;
       }
 
@@ -229,7 +247,7 @@ public:
 
       // geotiff_writer_.drawObjectOfInterest(Eigen::Vector2f(10.0,10.0), "hans" , francor_geotiff::MapWriterInterface::Color(255, 0,0));
 
-      //ROS_INFO("Sum: %ld", (long int)srv.response.sum);
+      //RCLCPP_INFO(this->get_logger(), "Sum: %ld", (long int)srv.response.sum);
     }
     // else
     // {
@@ -237,9 +255,9 @@ public:
     //   return;
     // }
 
-    for (size_t i = 0; i < plugin_vector_.size(); ++i){
-      plugin_vector_[i]->draw(&geotiff_writer_);
-    }
+    // for (size_t i = 0; i < plugin_vector_.size(); ++i){
+    //   plugin_vector_[i]->draw(&geotiff_writer_);
+    // }
 
     /**
       * No Victims for now, first  agree on a common standard for representation
@@ -249,7 +267,7 @@ public:
       worldmodel_msgs::GetObjectModel srv_objects;
       if (object_service_client_.call(srv_objects))
       {
-        ROS_INFO("GeotiffNode: Object service called successfully");
+        RCLCPP_INFO(this->get_logger(), "GeotiffNode: Object service called successfully");
 
         const worldmodel_msgs::ObjectModel& objects_model (srv_objects.response.model);
 
@@ -279,7 +297,7 @@ public:
 
     if (path_service_client_.call(srv_path))
     {
-      ROS_INFO("GeotiffNode: Path service called successfully");
+      RCLCPP_INFO(this->get_logger(), "GeotiffNode: Path service called successfully");
 
       std::vector<geometry_msgs::PoseStamped>& traj_vector (srv_path.response.trajectory.poses);
 
@@ -310,56 +328,54 @@ public:
     geotiff_writer_.writeGeotiffImage();
     running_saved_map_num_++;
 
-    ros::Duration elapsed_time (ros::Time::now() - start_time);
+    rclcpp::Duration elapsed_time (this->now() - start_time);
 
-    ROS_INFO("GeoTiff created in %f seconds", elapsed_time.toSec());
+    RCLCPP_INFO(this->get_logger(), "GeoTiff created in %f seconds", elapsed_time.seconds());
 
     qr_codes_logger_.clear();
     qr_codes_.clear();
   }
 
-  void timerSaveGeotiffCallback(const ros::TimerEvent& e)
+  void timerSaveGeotiffCallback()
   {
     this->writeGeotiff();
   }
 
-  void sysCmdCallback(const std_msgs::String& sys_cmd)
+  void sysCmdCallback(const std_msgs::msg::String::SharedPtr sys_cmd)
   {
-    if ( !(sys_cmd.data == "savegeotiff")){
+    if ( !(sys_cmd->data == "savegeotiff")){
       return;
     }
 
     this->writeGeotiff();
   }
 
-  bool serviceSaveGeotiffCall(
-    std_srvs::Empty::Request  &req,
-    std_srvs::Empty::Response &res)
+  void serviceSaveGeotiffCall(
+    const std_srvs::srv::Empty::Request::SharedPtr  req,
+    std_srvs::srv::Empty::Response::SharedPtr res)
   {
     this->writeGeotiff();
-    return true;
   }
 
-  void subMapCallback(const nav_msgs::OccupancyGrid& msg)
+  void subMapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
   {
-    ROS_INFO("Got Map");
-    map_ = msg;
+    RCLCPP_INFO(this->get_logger(), "Got Map");
+    map_ = *msg;
     map_.info.origin.orientation.w = 1.0;
-
-    ROS_INFO_STREAM("map info: " << map_.info.origin);
+    //RCLCPP_INFO_STREAM(this->get_logger(), "map info: " << map_.info.origin);
   } 
 
-  void subVictimsCallback(const geometry_msgs::PoseArray& msg)
+  void subVictimsCallback(const geometry_msgs::msg::PoseArray::SharedPtr msg)
   {
-    victims_ = msg;
+    victims_ = *msg;
   }
 
-  void subQrDetectionCallback(const ohm_rrl_perception_msgs::Qr& qr)
+  void subQrDetectionCallback(const ohm_rrl_perception_msgs::msg::Qr::SharedPtr qr)
   {
-    if (qr_codes_.find(qr.data) == qr_codes_.end()) {
-      auto qr_copy = qr;
+    if (qr_codes_.find(qr->data) == qr_codes_.end()) {
+      auto qr_copy = *qr;
       qr_copy.id = qr_codes_.size() + 1;
-      qr_codes_[qr.data] = qr_copy;      
+      qr_codes_[qr->data] = qr_copy;      
     }
   }
 
@@ -373,31 +389,28 @@ public:
 
   GeotiffWriter geotiff_writer_;
 
-  ros::ServiceClient map_service_client_;// = n.serviceClient<beginner_tutorials::AddTwoInts>("add_two_ints");
-  ros::ServiceClient object_service_client_;
+  rclcpp::Client<nav_msgs::srv::GetMap>::SharedPtr map_service_client_;
+  //rclcpp::Client<worldmodel_msgs::srv::GetObjectModel>::SharedPtr object_service_client_;
+  rclcpp::Service<std_srvs::srv::Empty>::SharedPtr srv_save_geotiff_;
 
-  ros::ServiceServer srv_save_geotiff_;
 
-  ros::Subscriber sys_cmd_sub_;
-  ros::Subscriber sub_map_;
-  ros::Subscriber sub_victims_;
-  ros::Subscriber sub_qr_detection_;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sys_cmd_sub_;
+  rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr sub_map_;
+  rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr sub_victims_;
+  rclcpp::Subscription<ohm_rrl_perception_msgs::msg::Qr>::SharedPtr sub_qr_detection_;
+  
+  nav_msgs::msg::OccupancyGrid map_;
 
-  ros::NodeHandle n_;
-  ros::NodeHandle pn_;
+  geometry_msgs::msg::PoseArray victims_;
 
-  nav_msgs::OccupancyGrid map_;
-
-  geometry_msgs::PoseArray victims_;
-
-  std::unordered_map<std::string, ohm_rrl_perception_msgs::Qr> qr_codes_;
+  std::unordered_map<std::string, ohm_rrl_perception_msgs::msg::Qr> qr_codes_;
   ObjectLog qr_codes_logger_;
 
-  std::vector<boost::shared_ptr<francor_geotiff::MapWriterPluginInterface> > plugin_vector_;
+  //std::vector<boost::shared_ptr<francor_geotiff::MapWriterPluginInterface> > plugin_vector_;
 
-  pluginlib::ClassLoader<francor_geotiff::MapWriterPluginInterface>* plugin_loader_;
+  //pluginlib::ClassLoader<francor_geotiff::MapWriterPluginInterface>* plugin_loader_;
 
-  ros::Timer map_save_timer_;
+  rclcpp::TimerBase::SharedPtr map_save_timer_;
 
   unsigned int running_saved_map_num_;
 };
@@ -406,17 +419,9 @@ public:
 
 int main(int argc, char** argv)
 {
-  ros::init(argc, argv, "geotiff_node");
-
-  francor_geotiff::MapGenerator mg;
-
-  //ros::NodeHandle pn_;
-  //double p_geotiff_save_period = 60.0f;
-  //pn_.param("geotiff_save_period", p_geotiff_save_period, 60.0);
-  //ros::Timer timer = pn_.createTimer(ros::Duration(p_geotiff_save_period), &MapGenerator::timerSaveGeotiffCallback, &mg, false);
-
-  ros::spin();
-
+  rclcpp::init(argc, argv);
+  rclcpp::spin(std::make_shared<francor_geotiff::MapGenerator>());
+  rclcpp::shutdown();
   return 0;
 }
 

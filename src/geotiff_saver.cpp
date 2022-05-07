@@ -27,10 +27,10 @@
 //=================================================================================================
 
 #include <cstdio>
-#include "ros/ros.h"
-#include "ros/console.h"
-#include "nav_msgs/GetMap.h"
-#include "geometry_msgs/Quaternion.h"
+#include <rclcpp/logging.hpp>
+#include <rclcpp/rclcpp.hpp>
+#include "nav_msgs/srv/get_map.hpp"
+#include "geometry_msgs/msg/quaternion.hpp"
 
 #include <Eigen/Geometry>
 
@@ -39,6 +39,7 @@
 #include <francor_geotiff/HectorMapTools.h>
 
 #include <francor_geotiff/geotiff_writer.h>
+#include <rclcpp/subscription.hpp>
 
 using namespace std;
 
@@ -47,19 +48,18 @@ namespace francor_geotiff{
 /**
  * @brief Map generation node.
  */
-class MapGenerator
+class MapGenerator : public rclcpp::Node
 {
   public:
-    MapGenerator(const std::string& mapname) : mapname_(mapname)
+    MapGenerator(const std::string& mapname) : Node("map_saver"), geotiff_writer(rclcpp::get_logger("map_saver")), mapname_(mapname)
     {
-      ros::NodeHandle n;
-      ROS_INFO("Waiting for the map");
-      map_sub_ = n.subscribe("map", 1, &MapGenerator::mapCallback, this);
+      RCLCPP_INFO(this->get_logger(), "Waiting for the map");
+      map_sub_ = this->create_subscription<nav_msgs::msg::OccupancyGrid>("map", 10, std::bind(&MapGenerator::mapCallback, this, std::placeholders::_1));
     }
 
-    void mapCallback(const nav_msgs::OccupancyGridConstPtr& map)
+    void mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr map)
     {
-      ros::Time start_time (ros::Time::now());
+      rclcpp::Time start_time (this->now());
 
       geotiff_writer.setMapFileName(mapname_);
       geotiff_writer.setupTransforms(*map);
@@ -69,14 +69,14 @@ class MapGenerator
 
       geotiff_writer.writeGeotiffImage();
 
-      ros::Duration elapsed_time (ros::Time::now() - start_time);
-      ROS_INFO("GeoTiff created in %f seconds", elapsed_time.toSec());
+      rclcpp::Duration elapsed_time (this->now() - start_time);
+      RCLCPP_INFO(this->get_logger(), "GeoTiff created in %f seconds", elapsed_time.seconds());
     }
 
     GeotiffWriter geotiff_writer;
 
     std::string mapname_;
-    ros::Subscriber map_sub_;
+    rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr map_sub_;
 };
 
 }
@@ -87,7 +87,7 @@ class MapGenerator
 
 int main(int argc, char** argv)
 {
-  ros::init(argc, argv, "map_saver");
+  rclcpp::init(argc, argv);
   std::string mapname = "map";
 
   for(int i=1; i<argc; i++)
@@ -116,10 +116,8 @@ int main(int argc, char** argv)
 
   //GeotiffWriter geotiff_writer;
   //geotiff_writer.setMapName("test");
-  francor_geotiff::MapGenerator mg(mapname);
-
-  ros::spin();
-
+  rclcpp::spin(std::make_shared<francor_geotiff::MapGenerator>(mapname));
+  rclcpp::shutdown();
   return 0;
 }
 

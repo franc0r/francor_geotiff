@@ -33,8 +33,9 @@
 
 #include <Eigen/Geometry>
 
-#include <nav_msgs/OccupancyGrid.h>
-#include <nav_msgs/MapMetaData.h>
+#include <nav_msgs/msg/occupancy_grid.hpp>
+#include <nav_msgs/msg/map_meta_data.hpp>
+#include <rclcpp/logger.hpp>
 
 #include <QtGui/QImage>
 #include <QtWidgets/QApplication>
@@ -50,7 +51,7 @@ namespace francor_geotiff{
 class GeotiffWriter : public MapWriterInterface
 {
   public:
-  GeotiffWriter(bool useCheckerboardCacheIn = false);
+  GeotiffWriter(rclcpp::Logger logger, bool useCheckerboardCacheIn = false);
   virtual ~GeotiffWriter();
 
   //setUsePrecalcGrid(bool usePrecalc, const Eigen::Vector2f& size);
@@ -60,9 +61,9 @@ class GeotiffWriter : public MapWriterInterface
   void setUseUtcTimeSuffix(bool useSuffix);
 
   void setupImageSize();
-  bool setupTransforms(const nav_msgs::OccupancyGrid& map);
+  bool setupTransforms(const nav_msgs::msg::OccupancyGrid& map);
   void drawBackgroundCheckerboard();
-  void drawMap(const nav_msgs::OccupancyGrid& map, bool draw_explored_space_grid = true);
+  void drawMap(const nav_msgs::msg::OccupancyGrid& map, bool draw_explored_space_grid = true);
   void drawObjectOfInterest(const Eigen::Vector2f& coords, const std::string& txt, const Color& color);
   inline virtual void drawPath(const Eigen::Vector3f& start, const std::vector<Eigen::Vector2f>& points){
       drawPath(start, points, 120,0,240);
@@ -123,10 +124,11 @@ protected:
   HectorMapTools::CoordinateTransformer<float> map_geo_transformer_;
   HectorMapTools::CoordinateTransformer<float> world_geo_transformer_;
 
-  nav_msgs::MapMetaData cached_map_meta_data_;
+  nav_msgs::msg::MapMetaData cached_map_meta_data_;
 
   int fake_argc_;
   char** fake_argv_;
+  rclcpp::Logger logger_;
 };
 
 }
